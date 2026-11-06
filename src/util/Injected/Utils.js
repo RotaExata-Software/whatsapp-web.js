@@ -466,13 +466,26 @@ exports.LoadUtils = () => {
                 .asUserWidOrThrow(from);
         }
 
-        const newMsgKey = new (window.require('WAWebMsgKey'))({
-            from: from,
-            to: chat.id,
-            id: newId,
-            participant: participant,
-            selfDir: 'out',
-        });
+        // Newer WA Web builds expect { fromMe, remote }. The legacy { from, to, selfDir }
+        // shape leaves an @lid key without fromMe/remote, so the message is never sent.
+        // Fall back to the legacy shape on builds that reject the new one.
+        let newMsgKey;
+        try {
+            newMsgKey = new (window.require('WAWebMsgKey'))({
+                fromMe: true,
+                remote: chat.id,
+                id: newId,
+                participant: participant,
+            });
+        } catch {
+            newMsgKey = new (window.require('WAWebMsgKey'))({
+                from: from,
+                to: chat.id,
+                id: newId,
+                participant: participant,
+                selfDir: 'out',
+            });
+        }
 
         const extraOptions = options.extraOptions || {};
         delete options.extraOptions;
@@ -483,7 +496,6 @@ exports.LoadUtils = () => {
 
         const message = {
             ...options,
-            id: newMsgKey,
             ack: 0,
             body: content,
             from: from,
@@ -505,6 +517,8 @@ exports.LoadUtils = () => {
             ...listOptions,
             ...botOptions,
             ...extraOptions,
+            // Last, so no spread model (media data, extraOptions) can overwrite the key.
+            id: newMsgKey,
         };
 
         // MediaData is a model whose private __x_id field collides with Msg's
@@ -612,7 +626,9 @@ exports.LoadUtils = () => {
 
         return window
             .require('WAWebCollections')
-            .Msg.get(newMsgKey._serialized || newMsgKey.$1);
+            .Msg.get(
+                newMsgKey._serialized || newMsgKey.$1 || newMsgKey.toString(),
+            );
     };
 
     window.WWebJS.editMessage = async (msg, content, options = {}) => {
